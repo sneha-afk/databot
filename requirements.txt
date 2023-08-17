@@ -1,0 +1,3 @@
+git+https://github.com/sneha-afk/semantic-kernel@demo-features#subdirectory=python
+pandas
+streamlit
