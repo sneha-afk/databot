@@ -1,3 +1,4 @@
+import asyncio
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,12 +7,15 @@ from utils import *
 from typing import List, Union
 
 
-kernel: sk.Kernel = None
+variables = dict()
 
 
 # Add new bot message underneath previous content
-def add_bot_msg(msg: Union[str, List[str]]):
-    with st.chat_message("assistant"):
+def add_message(
+    msg: Union[str, List[str]],
+    role: str = "assistant",
+):
+    with st.chat_message(role):
         if isinstance(msg, List):
             for m in msg:
                 st.write(m)
@@ -23,7 +27,7 @@ def starting():
     st.title("DataBot 🤖")
     st.subheader("An AI-powered data analysis tool.")
 
-    add_bot_msg(
+    add_message(
         [
             "Hello there, my name is DataBot. 👋",
             "Please enter your OpenAI API key to begin!",
@@ -39,16 +43,35 @@ def starting():
     return api_key_input
 
 
-api_key_obtained = False
-if api_key := starting():
-    kernel = setup(api_key)
+async def main():
+    if api_key := starting():
+        add_message(
+            "Great! Now upload CSV data for me to analyze along with your query."
+        )
+        files = st.file_uploader(
+            "Upload CSV file(s)", accept_multiple_files=True, type="csv"
+        )
 
-    add_bot_msg("Great! Now upload CSV data for me to analyze along with your query.")
-    files = st.file_uploader(
-        "Upload CSV file(s)", accept_multiple_files=True, type="csv"
-    )
+        if len(files):
+            dataframes = get_dataframes(files)
+            query_func = setup(api_key, dataframes)
 
-    if len(files):
-        dataframes = get_dataframes(files)
+            add_message("And what would you like to know about this data?")
 
-        add_bot_msg("And what would you like to know about this data?")
+            # query = st.chat_input()
+            # if query:
+            #     add_message(query, "user")
+            # answer = await query_func.invoke_async(query)
+            # add_message(answer)
+
+            query = st.text_area(
+                "Query for data", placeholder="What is the average value of..."
+            )
+
+            if st.button("Submit"):
+                answer = await get_answer(query, query_func)
+                add_message(answer)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
