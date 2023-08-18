@@ -27,9 +27,10 @@ def add_message(msg: str, role: str = "assistant", keep_history: bool = False):
             )
 
 
-def clear_message_view():
+def files_changed():
     """Still available in the string for downloading"""
     st.session_state.messages = []
+    st.session_state.reload_files = True
 
 
 def load_messages():
@@ -40,5 +41,4 @@ def load_messages():
 @st.cache_data
 def load_into_dataframe(data) -> pd.DataFrame:
     """Wrapping with ST's caching function"""
-    print("caching new file:", data.name)
     return pd.read_csv(data)
