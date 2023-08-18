@@ -1,51 +1,55 @@
 import asyncio
 import streamlit as st
-from typing import List, Union
+import pandas as pd
 
 import semantic_kernel as sk
 from semantic_kernel.connectors.ai.open_ai import OpenAIChatCompletion
 from semantic_kernel.core_skills import DataSkill
 
-from utils import get_answer, get_dataframes
+from utils import (
+    authenticate_key,
+    clear_message_view,
+    load_into_dataframe,
+    add_message,
+    load_messages,
+)
 
-ERR_MSG = """Error with query, either I was unable to code the write solution or I couldn't 
-understand your query. Apologies, maybe try rewording your question?
-"""
-
-# Used at runtime
-vars = dict()
-kernel: sk.Kernel
+ERR_MSG = "Error with query: I might have misinterpreted you, try rewording your query. Apologies!"
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "chat_history_string" not in st.session_state:
+    st.session_state.chat_history_string = ""
+if "prev_num_files" not in st.session_state:
+    st.session_state.prev_num_files = 0
 
 
-def clear_history():
-    st.session_state.messages = []
+async def query():
+    load_messages()
+    if query := st.chat_input():
+        add_message(query, "user", True)
 
+        answer = ""
+        try:
+            from_func = await st.session_state["query_func"].invoke_async(query)
+            answer = from_func.result.strip("`")
+        except Exception as e:
+            print(type(e))
+            answer = ERR_MSG
 
-def load_history():
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+        # Known bug, need to fix
+        if answer == query:
+            answer = ERR_MSG
 
+        add_message(answer, "assistant", True)
 
-# Add new bot message underneath previous content
-def add_message(
-    msg: Union[str, List[str]], role: str = "assistant", keep_history: bool = False
-):
-    with st.chat_message(role):
-        if isinstance(msg, List):
-            for m in msg:
-                st.write(m)
-
-            if keep_history:
-                st.session_state.messages.append({"role": role, "content": m})
-        else:
-            st.write(msg)
-
-            if keep_history:
-                st.session_state.messages.append({"role": role, "content": msg})
+    if len(st.session_state.messages):
+        st.download_button(
+            "Download chat history",
+            data=st.session_state.chat_history_string,
+            file_name="databot_chat_history.txt",
+            help="Get a text file containing all of your chat history",
+        )
 
 
 async def files_and_queries():
@@ -53,30 +57,25 @@ async def files_and_queries():
         "Upload CSV file(s)",
         accept_multiple_files=True,
         type="csv",
-        on_change=clear_history,
+        on_change=clear_message_view,
     )
 
     if len(files):
-        dataframes = get_dataframes(files)
-        vars["ds_instance"].add_data(*dataframes)
+        # As of 8/16/23: removing specific dataframes is not supported
+        if (
+            st.session_state["prev_num_files"] == 0
+            or len(files) != st.session_state["prev_num_files"]
+        ):
+            st.session_state["ds_instance"].clear_data()
+
+            # Add new dataframes, or load from cache
+            for file in files:
+                st.session_state["ds_instance"].add_data(load_into_dataframe(file))
 
         add_message("What do you want to know about?")
 
-        load_history()
-        if query := st.chat_input():
-            add_message(query, "user", True)
-
-            answer = ""
-            try:
-                answer = await get_answer(query, vars["query_func"])
-            except:
-                answer = ERR_MSG
-
-            # Known bug, need to fix
-            if answer == query:
-                answer = ERR_MSG
-
-            add_message(answer, "assistant", True)
+        await query()
+    st.session_state["prev_num_files"] = len(files)
 
 
 def setup(api_key):
@@ -88,35 +87,38 @@ def setup(api_key):
     skill_functions = kernel.import_skill(data_skill_instance, "data")
     query_func = skill_functions["queryAsync"]
 
-    vars["kernel"] = kernel
-    vars["chat_serv"] = chat_service
-    vars["ds_instance"] = data_skill_instance
-    vars["query_func"] = query_func
+    st.session_state["kernel"] = kernel
+    st.session_state["ds_instance"] = data_skill_instance
+    st.session_state["query_func"] = query_func
 
 
 async def main():
     st.title("DataBot 🤖")
-    st.subheader("An AI-powered data analysis tool.")
-    st.caption("Made with :heart: by [sneha-afk](https://github.com/sneha-afk)")
+    st.subheader("An AI-powered natural language data analysis tool.")
 
+    st.caption(
+        "Made with :heart: by [sneha-afk](https://github.com/sneha-afk) -- [source code](https://github.com/sneha-afk/databot)"
+    )
     add_message(
-        [
-            "Hello there, my name is DataBot. 👋",
-            "Please enter your OpenAI API key to begin!",
-        ]
+        "Hello there, my name is DataBot 👋. I make data analysis as easy as can be!\n\nEnter a valid OpenAI API key to begin!"
     )
 
     api_key_input = st.text_input(
         "OpenAI API key",
         type="password",
         help="Visit OpenAI to obtain an API key!",
-        placeholder="abc-...",
+        placeholder="sk-...",
     )
 
     if api_key := api_key_input:
-        add_message("Great! Please upload some CSV data for me to analyze!")
-        setup(api_key)
-        await files_and_queries()
+        if authenticate_key(api_key):
+            add_message("Great! Now upload CSV data for me to analyze.")
+            setup(api_key)
+            await files_and_queries()
+        else:
+            st.error(
+                ":warning: Error with validating OpenAI API key, please confirm your key."
+            )
 
 
 if __name__ == "__main__":
