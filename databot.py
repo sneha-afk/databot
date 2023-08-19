@@ -1,17 +1,14 @@
 import asyncio
 import streamlit as st
-import pandas as pd
 
-import semantic_kernel as sk
-from semantic_kernel.connectors.ai.open_ai import OpenAIChatCompletion
-from semantic_kernel.core_skills import DataSkill
-
+from datetime import datetime
 from utils import (
     authenticate_key,
     files_changed,
     load_into_dataframe,
     add_message,
     load_messages,
+    kernel_setup,
 )
 
 ERR_MSG = "Error with query: I might have misinterpreted you, try rewording your query. Apologies!"
@@ -26,6 +23,32 @@ if "kernel_setup" not in st.session_state:
     st.session_state.kernel_setup = False
 if "reload_files" not in st.session_state:
     st.session_state.reload_files = False
+
+# ========= ENTER =========
+st.title("DataBot 🤖")
+st.subheader("An AI-powered natural language data analysis tool.")
+st.caption("Made with :heart: by [sneha-afk](https://github.com/sneha-afk)")
+
+add_message(
+    "Hello there, my name is DataBot :wave:. I make data analysis as easy as can be!"
+)
+
+with st.sidebar:
+    st.title("SideBar-Bot?")
+    st.subheader("Don't steal that.")
+    st.caption("[View DataBot's source code](https://github.com/sneha-afk/databot)")
+    st.divider()
+    st.subheader("OpenAI API Key")
+
+    api_key_input = st.text_input(
+        "Press *Authenticate* after entering:",
+        type="password",
+        help="Visit OpenAI to obtain an API key!",
+        placeholder="sk-...",
+    )
+    api_submitted = st.button("Authenticate")
+
+# =========================
 
 
 async def query():
@@ -50,14 +73,14 @@ async def query():
         st.download_button(
             "Download chat history",
             data=st.session_state.chat_history_string,
-            file_name="databot_chat_history.txt",
+            file_name=f"databot_chat_history_{datetime.now().strftime('%Y-%m-%d-%H:%M')}.txt",
             help="Get a text file containing all of your chat history",
         )
 
 
 async def files():
     files = st.file_uploader(
-        "Upload CSV file(s)",
+        "Upload CSV file(s) for me to analyze!",
         accept_multiple_files=True,
         type="csv",
         on_change=files_changed,
@@ -77,53 +100,26 @@ async def files():
         await query()
 
 
-def setup(api_key):
-    chat_service = OpenAIChatCompletion("gpt-3.5-turbo", api_key)
-
-    kernel = sk.Kernel()
-    kernel.add_chat_service("DataBot", chat_service)
-    data_skill_instance = DataSkill(service=chat_service)
-    skill_functions = kernel.import_skill(data_skill_instance, "data")
-    query_func = skill_functions["queryAsync"]
-
-    st.session_state["kernel"] = kernel
-    st.session_state["ds_instance"] = data_skill_instance
-    st.session_state["query_func"] = query_func
-
-    st.session_state.kernel_setup = True
-
-
 async def main():
-    st.title("DataBot 🤖")
-    st.subheader("An AI-powered natural language data analysis tool.")
-
-    st.caption(
-        "Made with :heart: by [sneha-afk](https://github.com/sneha-afk) -- [source code](https://github.com/sneha-afk/databot)"
-    )
-    add_message(
-        "Hello there, my name is DataBot 👋. I make data analysis as easy as can be!\n\nEnter a valid OpenAI API key to begin!"
-    )
-
-    api_key_input = st.text_input(
-        "OpenAI API key",
-        type="password",
-        help="Visit OpenAI to obtain an API key!",
-        placeholder="sk-...",
-    )
-    api_submitted = st.button("Authenticate")
+    # If user submitted on previous run, reauthenticate and setup kernel
     if api_submitted:
         st.session_state.authenticated = authenticate_key(api_key_input)
+        st.session_state.kernel_setup = False
 
     if st.session_state.authenticated:
+        # Setup once per API key entry
         if not st.session_state.kernel_setup:
-            setup(api_key_input)
-    elif api_submitted:
-        st.error(
-            ":warning: Error with validating OpenAI API key, please confirm your key."
-        )
+            st.session_state.kernel_setup = kernel_setup(api_key_input)
+
+        with st.sidebar:
+            st.success("Authentication complete!")
+    elif api_submitted:  # User pressed submit but authentication failed
+        with st.sidebar:
+            st.error(
+                ":warning: Error with authentication, please confirm your key is valid."
+            )
 
     if st.session_state.kernel_setup:
-        add_message("Great! Now upload CSV data for me to analyze.")
         await files()
 
 
